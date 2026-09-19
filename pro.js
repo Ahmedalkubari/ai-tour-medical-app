@@ -67,7 +67,7 @@ async function gradeQuiz() {
   const j = await res.json();
   $('quizResult').innerHTML = `<div class="card"><h3>Score: ${j.score}% (${j.correct}/${j.total})</h3><div class="muted">Due for review: ${j.due_now} • Weak: ${j.weak_areas.map(w => w.topic_title + '×' + w.n).join('، ') || '—'}</div>` +
     j.detail.map(d => `<details><summary>${d.ok ? '✅' : '❌'} Q#${d.qid} — ${d.correct_answer}</summary><p>${d.explanation} <span class="muted">[${d.source}]</span></p>${d.explanation_ar ? `<p class="muted">🇾🇪 ${d.explanation_ar}</p>` : ''}${(d.images || []).map(im => `<figure><img src="${im.svg_path}" alt="${im.title}" style="max-width:100%;border:1px solid var(--border);border-radius:10px"/><figcaption class="muted small">${im.title} — ${im.caption}</figcaption></figure>`).join('')}</details>`).join('') + `</div>`;
-  try { Notification.requestPermission?.(); if (j.due_now) new Notification?.('AI Tour: review due', { body: `${j.due_now} cards due (SM-2)` }); } catch {}
+  try { if (window.Notification && Notification.permission === 'granted' && j.due_now) new Notification('AI Tour: review due', { body: `${j.due_now} cards due (SM-2)` }); } catch {}
   refreshDue();
 }
 async function refreshDue() {

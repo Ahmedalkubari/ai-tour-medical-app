@@ -10,6 +10,10 @@ const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA foreign_keys=ON');
 try { db.exec(fs.readFileSync(path.join(ROOT, 'db', 'migration_v3.sql'), 'utf8')); } catch {}
 try { db.exec(fs.readFileSync(path.join(ROOT, 'db', 'migration_v4.sql'), 'utf8')); } catch {}
+try {
+  const v5 = fs.readFileSync(path.join(ROOT, 'db', 'migration_v5.sql'), 'utf8').split(';');
+  for (const st of v5) { try { if (st.trim()) db.exec(st); } catch (e) { if (!/duplicate column/i.test(String(e))) throw e; } }
+} catch (e) { if (!/duplicate column/i.test(String(e))) console.error('v5:', String(e).slice(0, 120)); }
 // auto-link: each question -> one diagram sharing its topic (deterministic)
 try {
   db.exec(`INSERT OR IGNORE INTO Question_Images (question_id, image_id)
@@ -158,6 +162,46 @@ async function ragSmart(query, lang = 'ar') {
 }
 const qImages = (qid) => db.prepare('SELECT m.image_id, m.title, m.svg_path, m.caption FROM Question_Images qi JOIN Medical_Images m ON m.image_id=qi.image_id WHERE qi.question_id=?').all(qid);
 
+// --- FSRS-4.5-lite: stability/difficulty scheduler (SM-2 columns kept for compat) ---
+function fsrsNext(prev, grade) {
+  // grade 1..4 (1=again, 2=hard, 3=good, 4=easy); simplified FSRS-4.5 dynamics
+  let S = prev?.stability || 0, D = prev?.diff_fsrs ?? 5, reps = prev?.reps || 0;
+  const retrievability = (t, s) => s > 0 ? Math.pow(1 + 0.05 * t / Math.max(0.1, s), -0.5) : 0;
+  const R = retrievability(Math.max(0, 1), S || 1);
+  D = Math.min(10, Math.max(1, D - 0.2 * (grade - 3) + (grade === 1 ? 1.2 : 0)));
+  const SInc = grade === 1 ? 0.3 : grade === 2 ? 1.4 : grade === 3 ? 2.6 : 3.8;
+  S = reps === 0 ? (grade === 1 ? 0.4 : grade === 2 ? 1.2 : grade === 3 ? 2.4 : 4.0) : Math.max(0.2, S * (1 + SInc * (1 - R) * (11 - D) / 10));
+  const ivl = Math.max(1, Math.round(S * (grade === 1 ? 0.2 : grade === 2 ? 0.8 : 1)));
+  return { stability: +S.toFixed(2), diff_fsrs: +D.toFixed(2), interval_d: Math.min(365, ivl), state: grade === 1 ? 'relearning' : 'review' };
+}
+// --- Neural-ready cosine over stored vectors (MiniLM importable; hashed-lite fallback labeled honestly) ---
+function hashVec(text, dim = 128) {
+  const v = new Array(dim).fill(0);
+  const toks = tok2(text);
+  for (const w of toks) { let h = 0; for (const c of w) h = (h * 31 + c.codePointAt(0)) >>> 0; v[h % dim] += 1; }
+  const n = Math.sqrt(v.reduce((a, b) => a + b * b, 0)) || 1;
+  return v.map(x => x / n);
+}
+function neuralSearch(query, k = 5) {
+  const cov = db.prepare('SELECT COUNT(*) c FROM Question_Embeddings').get().c;
+  const total = db.prepare('SELECT COUNT(*) c FROM Question_Bank').get().c;
+  const qv = hashVec(query);
+  const cos = (a, b) => { let d = 0; for (let i = 0; i < a.length; i++) d += a[i] * b[i]; return d; };
+  let rows = [];
+  if (cov / Math.max(1, total) > 0.5) {
+    const all = db.prepare('SELECT question_id, vec_json FROM Question_Embeddings').all();
+    rows = all.map(r => ({ id: r.question_id, s: cos(qv, JSON.parse(r.vec_json)) })).sort((a, b) => b.s - a.s).slice(0, k);
+  } else {
+    // lite hashed vectors computed on the fly over top-BM25 candidates (honest lite mode)
+    const cand = bm25(query, 40);
+    const g = db.prepare('SELECT question_text, explanation FROM Question_Bank WHERE question_id=?');
+    rows = cand.map(c => { const d = g.get(c.question_id); return { id: c.question_id, s: cos(qv, hashVec(d.question_text + ' ' + d.explanation)) }; }).sort((a, b) => b.s - a.s).slice(0, k);
+  }
+  const g2 = db.prepare('SELECT question_id, question_text, explanation, exam_source FROM Question_Bank WHERE question_id=?');
+  const model = db.prepare('SELECT model FROM Question_Embeddings LIMIT 1').get()?.model || 'hash-trigram-lite';
+  return { hits: rows.map(x => ({ ...g2.get(x.id), score: +x.s.toFixed(3) })), model, neural_coverage: +(cov / Math.max(1, total)).toFixed(2) };
+}
+
 const server = http.createServer((req, res) => {
   const [_, ...parts] = req.url.split('?')[0].split('/');
   const q = parseQ(req.url);
@@ -203,9 +247,11 @@ const server = http.createServer((req, res) => {
             const row = g.get(id); if (!row) continue;
             const ok = String(answers[id]).trim() === String(row.correct_answer).trim();
             if (ok) correct++;
-            const prev = db.prepare('SELECT ease, interval_d, reps FROM SRS_Schedule WHERE user_id=? AND question_id=?').get(user_id, id);
+            const prev = db.prepare('SELECT ease, interval_d, reps, stability, diff_fsrs FROM SRS_Schedule WHERE user_id=? AND question_id=?').get(user_id, id);
             const s = sm2(prev || {}, ok ? 4 : 1);
-            up.run(user_id, id, s.ease, s.interval_d, s.reps, s.interval_d, ok ? 4 : 1);
+            const f = fsrsNext({ stability: prev?.stability || 0, diff_fsrs: prev?.diff_fsrs ?? 5, reps: prev?.reps || 0 }, ok ? 3 : 1);
+            up.run(user_id, id, s.ease, f.interval_d, s.reps, f.interval_d, ok ? 4 : 1);
+            db.prepare('UPDATE SRS_Schedule SET stability=?, diff_fsrs=?, state=? WHERE user_id=? AND question_id=?').run(f.stability, f.diff_fsrs, f.state, user_id, id);
             db.prepare(`INSERT INTO Question_Stats (question_id, attempts, correct, difficulty, updated_at) VALUES (?,?,?,datetime('now'))
               ON CONFLICT(question_id) DO UPDATE SET attempts=attempts+1, correct=correct+?, difficulty=1.0* (correct+?)*1.0/(attempts+1), updated_at=datetime('now')`).run(id, 1, ok ? 1 : 0, ok ? 1 : 0, ok ? 1 : 0);
             detail.push({ qid: id, ok, correct_answer: row.correct_answer, explanation: row.explanation, source: row.exam_source, topic_id: row.topic_id, images: qImages(id) });
@@ -240,6 +286,54 @@ const server = http.createServer((req, res) => {
           if (!query.trim()) return send(res, 400, { error: 'empty query' });
           send(res, 200, await ragSmart(query.slice(0, 500), lang));
         });
+      }
+      if (parts[1] === 'rag-neural' && req.method === 'POST') {
+        let body = ''; req.on('data', c => body += c); return req.on('end', async () => {
+          const { query = '', lang = 'ar' } = JSON.parse(body || '{}');
+          if (!query.trim()) return send(res, 400, { error: 'empty query' });
+          const base = rag(query.slice(0, 500), lang);
+          const { hits, model, neural_coverage } = neuralSearch(query.slice(0, 500), 5);
+          const extra = hits.map((h, i) => `[N${i + 1}|cos=${h.score}] Q#${h.question_id}: ${h.question_text}\n    → ${h.explanation} (${h.exam_source})`).join('\n');
+          const llm = await ollamaGen(`Question: ${query}\nEvidence:\n${extra}\nAnswer concisely with citations [N1..N5].`);
+          send(res, 200, { ...base, neural: hits.map(h => ({ qid: h.question_id, source: h.exam_source, score: h.score })), model, neural_coverage, mode: llm ? 'ollama+neural' : (neural_coverage > 0.5 ? 'neural-minilm' : 'neural-lite'),
+            answer: `${base.answer}\n${lang === 'ar' ? `أدلة عصبية (${model}, تغطية ${Math.round(neural_coverage * 100)}%):` : `Neural evidence (${model}, coverage ${Math.round(neural_coverage * 100)}%):`}\n${extra}${llm ? `\n🤖 Ollama:\n${llm}` : ''}` });
+        });
+      }
+      if (parts[1] === 'faculty-overview') {
+        const users = db.prepare('SELECT COUNT(DISTINCT user_id) c FROM SRS_Schedule').get().c;
+        const attempts = db.prepare('SELECT COUNT(*) c FROM SRS_Schedule').get().c;
+        const avgEase = db.prepare('SELECT AVG(ease) e FROM SRS_Schedule').get().e;
+        const weak = db.prepare(`SELECT t.topic_title topic, COUNT(*) n FROM SRS_Schedule s JOIN Question_Bank qb ON qb.question_id=s.question_id JOIN Modules_Topics t ON t.topic_id=qb.topic_id WHERE s.last_grade<3 GROUP BY t.topic_id ORDER BY n DESC LIMIT 10`).all();
+        const hard = db.prepare('SELECT question_id, difficulty, attempts FROM Question_Stats ORDER BY difficulty DESC LIMIT 10').all();
+        const cov = db.prepare("SELECT COUNT(DISTINCT target_id) c FROM Review_Flags WHERE target_kind='question' AND status='approved'").get().c;
+        const total = db.prepare('SELECT COUNT(*) c FROM Question_Bank').get().c;
+        return send(res, 200, { users, attempts, avg_ease: +(avgEase || 0).toFixed(2), weak_topics: weak, hardest: hard, review_pct: +(100 * cov / Math.max(1, total)).toFixed(1) });
+      }
+      if (parts[1] === 'import-exam' && req.method === 'POST') {
+        let body = ''; req.on('data', c => body += c); return req.on('end', () => {
+          // accepts {filename, source, raw_text} in parser.mjs Q:/A)/Answer:/Explain:/Source: format; PDFs must be converted to text first (see docs/exam-import.md)
+          const { filename = 'upload.txt', source = 'Manual-Upload', raw_text = '' } = JSON.parse(body || '{}');
+          const blocks = String(raw_text).split(/\n{2,}/);
+          const ins = db.prepare('INSERT INTO Question_Bank (topic_id, question_type, question_text, options_json, correct_answer, explanation, exam_source) VALUES (?,?,?,?,?,?,?)');
+          const firstT = db.prepare('SELECT topic_id FROM Modules_Topics ORDER BY topic_id LIMIT 1').get().topic_id;
+          let inserted = 0;
+          db.exec('BEGIN');
+          for (const b of blocks) {
+            const mQ = /Q:\s*(.+)/i.exec(b); if (!mQ) continue;
+            const opts = {}; for (const L of ['A', 'B', 'C', 'D']) { const m = new RegExp(L + '\\)\\s*([^|\\n]+)').exec(b); if (m) opts[L] = m[1].trim(); }
+            const ans = /Answer:\s*([A-D]|[^|\n]+)/i.exec(b)?.[1]?.trim();
+            if (Object.keys(opts).length < 2 || !ans) continue;
+            const exp = /Explain:\s*([^|]+)/i.exec(b)?.[1]?.trim() || '';
+            ins.run(firstT, 'mcq_single', mQ[1].trim(), JSON.stringify(opts), ans, exp, source);
+            inserted++;
+          }
+          db.exec('COMMIT');
+          db.prepare('INSERT INTO Exam_Imports (filename, source, total, inserted, status) VALUES (?,?,?,?,?)').run(filename.slice(0, 200), source.slice(0, 200), blocks.length, inserted, inserted ? 'imported-pending-review' : 'failed');
+          send(res, 200, { blocks: blocks.length, inserted });
+        });
+      }
+      if (parts[1] === 'imports') {
+        return send(res, 200, { rows: db.prepare('SELECT * FROM Exam_Imports ORDER BY import_id DESC LIMIT 20').all() });
       }
       if (parts[1] === 'review-queue') {
         const rows = db.prepare(`SELECT q.question_id id, q.question_text text, q.exam_source src, 'question' kind FROM Question_Bank q LEFT JOIN Review_Flags f ON f.target_kind='question' AND f.target_id=q.question_id AND f.status='approved' WHERE f.flag_id IS NULL ORDER BY q.question_id LIMIT ?`).all(Math.min(50, +q.n || 20));

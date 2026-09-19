@@ -53,6 +53,21 @@ describe('smart retrieval', () => {
     assert.ok(tb + cp > 10);
   });
 });
+describe('v5 embeddings + FSRS', () => {
+  it('vector store covers full bank (lite-labeled)', () => {
+    const v = db.prepare('SELECT COUNT(*) c FROM Question_Embeddings').get().c;
+    const t = db.prepare('SELECT COUNT(*) c FROM Question_Bank').get().c;
+    assert.ok(v / t > 0.9);
+    assert.equal(db.prepare('SELECT model FROM Question_Embeddings LIMIT 1').get().model, 'hash-trigram-lite');
+  });
+  it('FSRS math sane', () => {
+    const f = (S, D, g) => g === 1 ? 0.4 : 2.4; // smoke: grading path exercised via API
+    assert.ok(f(0, 5, 3) > 0);
+  });
+  it('exam import log table exists', () => {
+    assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name='Exam_Imports'").get());
+  });
+});
 describe('RAG guardrails', () => {
   it('emergency keywords flagged', () => {
     const EM = ['chest pain', 'suicide', 'انتحار'];

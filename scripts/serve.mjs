@@ -97,6 +97,65 @@ function ragSem(query, lang = 'ar') {
   const extra = sem.map((h, i) => `[S${i + 1}|cos=${h.score}] Q#${h.question_id}: ${h.question_text}\n    → ${h.explanation} (${h.exam_source})`).join('\n');
   return { ...base, semantic: sem.map(h => ({ qid: h.question_id, source: h.exam_source, score: h.score })), answer: `${base.answer}\n${lang === 'ar' ? 'أدلة دلالية (TF-IDF cosine):' : 'Semantic evidence (TF-IDF cosine:'}\n${extra}\n— ${lang === 'ar' ? 'وضع LLM الخارجي: ' + (JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'llm.json'), 'utf8')).provider) + ' (استخلاصي محلي افتراضياً؛ فعّل Ollama/WebLLM اختيارياً).' : 'External LLM mode: extractive-local by default; enable Ollama/WebLLM optionally.'}` };
 }
+const SYN = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'synonyms.json'), 'utf8'));
+const arNorm = (s) => String(s || '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').toLowerCase();
+const tok2 = (s) => { const t = arNorm(s).replace(/[^a-z0-9\u0600-\u06ff\s]/g, ' ').split(/\s+/).filter(w => w.length > 2); const bi = []; for (let i = 0; i + 1 < t.length; i++) bi.push(t[i] + '_' + t[i + 1]); return [...t, ...bi]; };
+function expandQ(query) {
+  const base = tok2(query); const out = new Set(base);
+  const low = arNorm(query);
+  for (const [k, syns] of Object.entries(SYN)) {
+    if (low.includes(k) || syns.some(s => low.includes(arNorm(s)))) { syns.forEach(s => tok2(s).forEach(w => out.add(w))); tok2(k).forEach(w => out.add(w)); }
+  }
+  return [...out];
+}
+let BM = null;
+function buildBM() {
+  const docs = db.prepare('SELECT question_id, question_text, explanation FROM Question_Bank').all();
+  const df = {}, Lens = [], vecs = [];
+  for (const d of docs) {
+    const tf = {}; const toks = tok2(d.question_text + ' ' + d.explanation);
+    for (const w of toks) tf[w] = (tf[w] || 0) + 1;
+    for (const w of Object.keys(tf)) df[w] = (df[w] || 0) + 1;
+    Lens.push(toks.length); vecs.push({ id: d.question_id, tf, len: toks.length });
+  }
+  BM = { vecs, df, N: docs.length, avgL: Lens.reduce((a, b) => a + b, 0) / Math.max(1, Lens.length) };
+}
+function bm25(query, k = 5) {
+  if (!BM) buildBM();
+  const qtf = {}; for (const w of expandQ(query)) qtf[w] = (qtf[w] || 0) + 1;
+  const K1 = 1.5, B = 0.75;
+  const scored = BM.vecs.map(v => {
+    let s = 0;
+    for (const w of Object.keys(qtf)) {
+      const f = v.tf[w] || 0; if (!f) continue;
+      const idf = Math.log(1 + (BM.N - (BM.df[w] || 0) + 0.5) / ((BM.df[w] || 0) + 0.5));
+      s += idf * (f * (K1 + 1)) / (f + K1 * (1 - B + B * (v.len / BM.avgL)));
+    }
+    return { id: v.id, s };
+  }).filter(x => x.s > 0).sort((a, b) => b.s - a.s).slice(0, k);
+  const g = db.prepare('SELECT question_id, question_text, explanation, exam_source FROM Question_Bank WHERE question_id=?');
+  return scored.map(x => ({ ...g.get(x.id), score: +x.s.toFixed(3) }));
+}
+async function ollamaGen(prompt) {
+  const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'llm.json'), 'utf8'));
+  if (!cfg.ollama?.enabled) return null;
+  try {
+    const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 20000);
+    const r = await fetch((cfg.ollama.url || 'http://localhost:11434') + '/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: ctrl.signal, body: JSON.stringify({ model: cfg.ollama.model || 'meditron:7b', prompt: prompt.slice(0, 3000), stream: false }) });
+    clearTimeout(t);
+    const j = await r.json();
+    return j.response ? String(j.response).slice(0, 2000) : null;
+  } catch { return null; }
+}
+async function ragSmart(query, lang = 'ar') {
+  const base = rag(query, lang);
+  const sem = bm25(query, 5);
+  const extra = sem.map((h, i) => `[B${i + 1}|bm25=${h.score}] Q#${h.question_id}: ${h.question_text}\n    → ${h.explanation} (${h.exam_source})`).join('\n');
+  const ctx = `Question: ${query}\nEvidence:\n${extra}\nAnswer concisely with citations [B1..B5], flag emergencies, end with: educational only.`;
+  const llm = await ollamaGen(ctx);
+  return { ...base, semantic: sem.map(h => ({ qid: h.question_id, source: h.exam_source, score: h.score })), mode: llm ? 'ollama' : 'extractive-bm25',
+    answer: `${base.answer}\n${lang === 'ar' ? 'أدلة BM25 (عربي/إنجليزي + مرادفات):' : 'BM25 evidence (AR/EN + synonyms):'}\n${extra}${llm ? `\n🤖 Ollama draft:\n${llm}` : `\n(Ollama معطّل — عزز في data/llm.json. الوضع الحالي: استخلاصي محلي.)`}` };
+}
 const qImages = (qid) => db.prepare('SELECT m.image_id, m.title, m.svg_path, m.caption FROM Question_Images qi JOIN Medical_Images m ON m.image_id=qi.image_id WHERE qi.question_id=?').all(qid);
 
 const server = http.createServer((req, res) => {
@@ -173,6 +232,13 @@ const server = http.createServer((req, res) => {
           const { query = '', lang = 'ar' } = JSON.parse(body || '{}');
           if (!query.trim()) return send(res, 400, { error: 'empty query' });
           send(res, 200, ragSem(query.slice(0, 500), lang));
+        });
+      }
+      if (parts[1] === 'rag-smart' && req.method === 'POST') {
+        let body = ''; req.on('data', c => body += c); return req.on('end', async () => {
+          const { query = '', lang = 'ar' } = JSON.parse(body || '{}');
+          if (!query.trim()) return send(res, 400, { error: 'empty query' });
+          send(res, 200, await ragSmart(query.slice(0, 500), lang));
         });
       }
       if (parts[1] === 'review-queue') {

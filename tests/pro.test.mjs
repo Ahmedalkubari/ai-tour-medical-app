@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
+import fs from 'node:fs';
 
 const db = new DatabaseSync(path.resolve('data', 'medical_app.db'));
 
@@ -39,6 +40,17 @@ describe('v4 trust layer', () => {
   it('TF-IDF corpus built', () => {
     const c = db.prepare('SELECT COUNT(*) c FROM Question_Bank').get().c;
     assert.ok(c >= 3000);
+  });
+});
+describe('smart retrieval', () => {
+  it('synonyms file covers AR/EN', () => {
+    const s = JSON.parse(fs.readFileSync('data/synonyms.json', 'utf8'));
+    assert.ok(s.jaundice.some(x => x.includes('يرقان')));
+  });
+  it('core high-yield topics well covered (TB/chest pain)', () => {
+    const tb = db.prepare(`SELECT COUNT(*) c FROM Question_Bank WHERE question_text LIKE '%TB%' OR question_text LIKE '%tuberculosis%' OR explanation LIKE '%HRZE%'`).get().c;
+    const cp = db.prepare(`SELECT COUNT(*) c FROM Question_Bank WHERE question_text LIKE '%chest pain%' OR question_text LIKE '%STEMI%'`).get().c;
+    assert.ok(tb + cp > 10);
   });
 });
 describe('RAG guardrails', () => {

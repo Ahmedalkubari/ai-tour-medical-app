@@ -38,10 +38,10 @@ async function loadQueue() {
     const i = document.getElementById('q'); const v = i.value.trim(); if (!v) return;
     if (!document.getElementById('semToggle').checked) return old();
     const lang = localStorage.getItem('ai_tour_lang') || 'ar';
-    const r = await fetch('/api/rag-sem', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: v, lang }) });
+    const r = await fetch('/api/rag-smart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: v, lang }) });
     const j = await r.json();
     const m = document.getElementById('msgs'); const d = document.createElement('div'); d.className = 'msg ai';
-    d.textContent = '🧠 SEMANTIC: ' + j.answer; m.appendChild(d); m.scrollTop = m.scrollHeight; i.value = '';
+    d.textContent = `🧠 SMART [${j.mode}]: ` + j.answer; m.appendChild(d); m.scrollTop = m.scrollHeight; i.value = '';
   };
 })();
 // adaptive quiz + images in results + study plan

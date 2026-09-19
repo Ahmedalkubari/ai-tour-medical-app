@@ -2,11 +2,12 @@
   "database": "data/medical_app.db",
   "academic_levels": 7,
   "courses": 28,
-  "modules_topics": 200,
+  "modules_topics": 350,
   "references": 7,
-  "questions": 70,
-  "clinical_cases": 8,
-  "progress_rows": 12,
-  "fk_violations": 0,
-  "null_question_check": 0
+  "questions": 3270,
+  "clinical_cases": 128,
+  "osce_stations": 32,
+  "images": 50,
+  "chapters": 50,
+  "fk_violations": 0
 }

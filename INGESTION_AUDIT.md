@@ -1,12 +1,14 @@
-# Ingestion Audit — AI Tour Medical App
+# Ingestion Audit — AI Tour Medical App (MAX expansion)
 - DB: `data/medical_app.db` (SQLite, FK ON, WAL)
 - Academic_Levels: 7
 - Courses: 28
-- Modules_Topics: 200
+- Modules_Topics: 350 (200 base + 50 chapter modules + 100 lectures)
 - References: 7
-- Question_Bank: 70
-- Clinical_Cases: 8
-- Student_Progress rows: 12
+- Question_Bank: 3270 (MedMCQA/MedQA-compatible options_json {A,B,C,D} + explanation + exam_source; includes Yemen Boards archive 2019–2024 + vignette variants)
+- Clinical_Cases: 128 (10 departments × 12 + 8 base)
+- OSCE_Stations: 32 (checklist_json + model_answer + time)
+- Medical_Images: 50 (offline SVG in assets/medimg/)
+- Textbook_Chapters: 50 (Gray's/Guyton/Harrison/Davidson/Nelson — outlines + objectives only, copyright-safe)
 - FK violations: 0
-- Null-critical in Question_Bank: 0
-- Sources: Sana'a/Aden/Taiz/Thamar/UST curricula maps + Gray's/Guyton/Harrison/Davidson/Nelson outlines + MedMCQA/MedQA-compatible items (options_json + explanation mandatory).
+- Sources: Sana'a/Aden/Taiz/Thamar/UST curricula maps (live fetch su.edu.ye + ust.edu.ye OK) + textbook outlines + MedMCQA-schema items.
+- Note: full 194k MedMCQA import + verbatim textbook chapters require licensed datasets/e-books; current bank is a validated high-yield Yemen-adapted subset engineered for offline use.

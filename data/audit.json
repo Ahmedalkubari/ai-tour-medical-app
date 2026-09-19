@@ -1,0 +1,12 @@
+{
+  "database": "data/medical_app.db",
+  "academic_levels": 7,
+  "courses": 28,
+  "modules_topics": 200,
+  "references": 7,
+  "questions": 70,
+  "clinical_cases": 8,
+  "progress_rows": 12,
+  "fk_violations": 0,
+  "null_question_check": 0
+}

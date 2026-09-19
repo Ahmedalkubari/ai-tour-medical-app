@@ -1,0 +1,74 @@
+{
+  "universities": [
+    "Sana'a University",
+    "Aden University",
+    "Taiz University",
+    "Thamar University",
+    "UST"
+  ],
+  "system": "MBBS 6 years + internship year; basic (1-2), preclinical (3), clinical (4-6)",
+  "sources": [
+    "https://su.edu.ye/chm/en",
+    "https://ust.edu.ye/med/en/home-en/medicine-and-surgery"
+  ],
+  "year_map": {
+    "1": [
+      "Anatomy I",
+      "Physiology I",
+      "Biochemistry I",
+      "Histology & Embryology"
+    ],
+    "2": [
+      "Anatomy II",
+      "Physiology II",
+      "Biochemistry II",
+      "Community Medicine I"
+    ],
+    "3": [
+      "Pathology",
+      "Pharmacology",
+      "Microbiology & Immunology",
+      "Parasitology"
+    ],
+    "4": [
+      "Internal Medicine I",
+      "General Surgery I",
+      "Pediatrics I",
+      "Forensic Medicine"
+    ],
+    "5": [
+      "Internal Medicine II",
+      "General Surgery II",
+      "OB/GYN I",
+      "Ophthalmology & ENT"
+    ],
+    "6": [
+      "OB/GYN II",
+      "Pediatrics II",
+      "Psychiatry",
+      "Public Health & Family Medicine",
+      "Emergency & Critical Care"
+    ],
+    "internship": [
+      "Internal Medicine",
+      "Surgery/Emergency",
+      "Pediatrics & OBGYN",
+      "Psychiatry",
+      "Family Medicine",
+      "Public Health"
+    ]
+  },
+  "fetch_attempts": [
+    {
+      "url": "https://su.edu.ye/chm/en",
+      "status": 200,
+      "ok": true
+    },
+    {
+      "url": "https://ust.edu.ye/med/en/home-en/medicine-and-surgery",
+      "status": 200,
+      "ok": true
+    }
+  ],
+  "fetched_at": "2026-09-19T00:42:12.197Z"
+}

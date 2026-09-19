@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>AI Tour Medical App — جولة طبية</title>
+<link rel="manifest" href="manifest.json"/>
+<link rel="stylesheet" href="styles.css"/>
+<meta name="theme-color" content="#0B0F19"/>
+</head>
+<body>
+<header class="topbar"><div class="topbar-inner">
+  <div class="brand"><span class="dot"></span><span data-i18n="brand">AI Tour Medical</span></div>
+  <nav class="nav">
+    <button data-screen="dashboard" class="active" data-i18n="nav_dash">الخارطة / Dashboard</button>
+    <button data-screen="companion" data-i18n="nav_ai">المساعد الذكي</button>
+    <button data-screen="vault" data-i18n="nav_vault">المكتبة Vault</button>
+  </nav>
+  <button class="lang" id="langBtn">EN</button>
+</div></header>
+
+<main class="wrap">
+  <!-- Screen A -->
+  <section id="screen-dashboard">
+    <div class="card"><h2 data-i18n="dash_title">خارطة الرحلة الأكاديمية</h2>
+      <p class="muted small" data-i18n="dash_sub">السنوات 1–6 + الامتياز — المقرر الحالي وتقدم الوحدات الأسبوعية. يعمل أوفلاين بالكامل.</p>
+      <div class="grid cols3">
+        <div class="card"><div class="muted small" data-i18n="cur_course">المقرر الحالي</div><h3 id="curCourse">Internal Medicine II — الباطنة II</h3><span class="badge ok" id="weekBadge">Week 6/12</span></div>
+        <div class="card"><div class="muted small" data-i18n="week_prog">تقدم الأسبوع</div><h3 id="weekPct">42%</h3><div class="progress"><div id="weekBar" style="width:42%"></div></div></div>
+        <div class="card"><div class="muted small" data-i18n="quiz_avg">متوسط الاختبارات</div><h3 id="quizAvg">78%</h3><div class="muted small">demo_student • offline</div></div>
+      </div>
+      <div class="timeline" id="timeline"></div>
+    </div>
+  </section>
+
+  <!-- Screen B -->
+  <section id="screen-companion" hidden>
+    <div class="card"><h2 data-i18n="ai_title">المساعد الذكي — تفكير سريري</h2>
+      <p class="muted small" data-i18n="ai_sub">واجهة نظيفة للأسئلة الطبية والحالات السريرية (قواعد أوفلاين + شروحات). للحالات الطارئة اتصل بالإسعاف.</p>
+      <div class="chat"><div class="msgs" id="msgs"></div>
+        <div class="row"><input id="q" data-i18n-ph="ai_ph" placeholder="اسأل: أسباب ألم الصدر؟ DKA؟ croup؟"/><button class="primary" id="send">➤</button></div>
+        <div class="small muted" data-i18n="ai_note">يعتمد على بنك الأسئلة والحالات المحلية في medical_app.db (نسخة JSON مضمّنة).</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Screen C -->
+  <section id="screen-vault" hidden>
+    <div class="card"><h2 data-i18n="vault_title">المكتبة المعرفية — تصفح هرمي أوفلاين</h2>
+      <p class="muted small" data-i18n="vault_sub">وحدات → محاضرات → مراجع PDF. البيانات من قاعدة medical_app.db.</p>
+      <div class="row"><input id="vaultSearch" data-i18n-ph="vault_ph" placeholder="ابحث: تشريح، باطنة، TB…"/><button class="primary" id="vaultBtn" data-i18n="search">بحث</button></div>
+      <div class="tree" id="vaultTree"></div>
+      <h3 data-i18n="refs">المراجع المعتمدة</h3><div id="refs" class="grid cols2"></div>
+    </div>
+  </section>
+
+  <div class="card small muted">DB: <span class="kbd">data/medical_app.db</span> • SQLite local-first • FK ON • <span id="auditLine">…</span></div>
+</main>
+<footer>AI Tour Medical • Sana'a / Aden / Taiz / Thamar / UST • Gray's • Guyton • Harrison • Davidson • Nelson • MedMCQA/MedQA-compatible</footer>
+<script src="app.js"></script>
+</body>
+</html>

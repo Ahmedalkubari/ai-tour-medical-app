@@ -1,0 +1,12 @@
+# Ingestion Audit — AI Tour Medical App
+- DB: `data/medical_app.db` (SQLite, FK ON, WAL)
+- Academic_Levels: 7
+- Courses: 28
+- Modules_Topics: 200
+- References: 7
+- Question_Bank: 70
+- Clinical_Cases: 8
+- Student_Progress rows: 12
+- FK violations: 0
+- Null-critical in Question_Bank: 0
+- Sources: Sana'a/Aden/Taiz/Thamar/UST curricula maps + Gray's/Guyton/Harrison/Davidson/Nelson outlines + MedMCQA/MedQA-compatible items (options_json + explanation mandatory).

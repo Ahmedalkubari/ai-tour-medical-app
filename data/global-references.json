@@ -1,0 +1,73 @@
+{
+  "references": [
+    {
+      "book": "Gray's Anatomy",
+      "outline": [
+        "Upper/Lower limbs",
+        "Thorax",
+        "Abdomen/Pelvis",
+        "Head & Neck",
+        "Neuroanatomy"
+      ]
+    },
+    {
+      "book": "Guyton & Hall Physiology",
+      "outline": [
+        "Membrane/Nerve-Muscle",
+        "Heart/Circulation",
+        "Respiratory",
+        "Renal/Acid-base",
+        "Endocrine/Reproduction"
+      ]
+    },
+    {
+      "book": "Harrison's Internal Medicine",
+      "outline": [
+        "Cardiology",
+        "Pulmonary",
+        "Nephrology",
+        "GI/Hepatology",
+        "Heme-Onc",
+        "ID",
+        "Endo",
+        "Neuro"
+      ]
+    },
+    {
+      "book": "Davidson's Medicine",
+      "outline": [
+        "Clinical decision-making",
+        "Emergency presentations",
+        "Poisoning",
+        "Infectious diseases"
+      ]
+    },
+    {
+      "book": "Nelson Pediatrics",
+      "outline": [
+        "Neonatology",
+        "Growth/Nutrition",
+        "IMCI/Infections",
+        "Vaccination (EPI)",
+        "Genetics/Metabolic"
+      ]
+    }
+  ],
+  "medmcqa": {
+    "fields": [
+      "id",
+      "question",
+      "opa",
+      "opb",
+      "opc",
+      "opd",
+      "cop",
+      "choice_type",
+      "exp",
+      "subject_name",
+      "topic_name"
+    ],
+    "note": "Question_Bank stores options_json={A,B,C,D} + correct_answer + explanation + exam_source — MedMCQA-compatible."
+  },
+  "fetched_at": "2026-09-19T00:42:12.387Z"
+}

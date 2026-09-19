@@ -1,0 +1,12 @@
+{
+  "name": "ai-tour-medical-app",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "AI Tour Medical Application — offline-first minimalist educational system for Yemeni medical students",
+  "scripts": {
+    "build:db": "node scripts/build-db.mjs",
+    "validate": "node pipeline/validate.mjs",
+    "pipeline": "node pipeline/run-all.mjs",
+    "serve": "node scripts/serve.mjs"
+  }
+}

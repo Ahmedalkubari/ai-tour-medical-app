@@ -1,2 +1,5 @@
 node_modules/
 .DS_Store
+data/medical_app.db-shm
+data/medical_app.db-wal
+data/client-errors.log

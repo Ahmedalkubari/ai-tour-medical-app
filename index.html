@@ -9,17 +9,23 @@
 <meta name="theme-color" content="#0B0F19"/>
 </head>
 <body>
+<a href="#main" class="kbd" style="position:absolute;left:-999px" onfocus="this.style.left='8px'">Skip to content</a>
 <header class="topbar"><div class="topbar-inner">
-  <div class="brand"><span class="dot"></span><span data-i18n="brand">AI Tour Medical</span></div>
-  <nav class="nav">
+  <div class="brand"><span class="dot" aria-hidden="true"></span><span data-i18n="brand">AI Tour Medical</span></div>
+  <nav class="nav" aria-label="Main">
     <button data-screen="dashboard" class="active" data-i18n="nav_dash">الخارطة / Dashboard</button>
+    <button data-screen="quiz" data-i18n="nav_quiz">اختبار Quiz</button>
     <button data-screen="companion" data-i18n="nav_ai">المساعد الذكي</button>
     <button data-screen="vault" data-i18n="nav_vault">المكتبة Vault</button>
+    <button data-screen="atlas" data-i18n="nav_atlas">الجامعات Atlas</button>
   </nav>
-  <button class="lang" id="langBtn">EN</button>
-</div></header>
+  <label class="small muted" for="userSel">User</label><select id="userSel" class="lang" aria-label="User account"></select>
+  <button class="lang" id="langBtn" aria-label="Language">EN</button>
+</div>
+<div class="wrap" role="note" aria-label="Medical disclaimer" style="padding:0 16px"><div class="card small" style="border-color:var(--crimson)">⚠️ <span data-i18n="disclaimer">تعليمي فقط — ليس استشارة طبية. الحالات الطارئة: اتصل بالإسعاف/المشرف. لا تدخل بيانات مرضى حقيقية (PII).</span></div></div>
+</header>
 
-<main class="wrap">
+<main class="wrap" id="main">
   <!-- Screen A -->
   <section id="screen-dashboard">
     <div class="card"><h2 data-i18n="dash_title">خارطة الرحلة الأكاديمية</h2>
@@ -54,9 +60,30 @@
     </div>
   </section>
 
-  <div class="card small muted">DB: <span class="kbd">data/medical_app.db</span> • SQLite local-first • FK ON • <span id="auditLine">…</span></div>
+  <!-- Screen Q: Timed Quiz + Boards mock -->
+  <section id="screen-quiz" hidden>
+    <div class="card"><h2>⏱️ Quiz & Boards Mock</h2>
+      <p class="muted small">Live DB via API • timed • instant grading with explanations + weak-area analysis (SM-2 scheduled).</p>
+      <div class="row"><select id="quizN" aria-label="Questions"><option value="10">10 Q / 10 min</option><option value="20">20 Q / 20 min</option><option value="50">50 Q / 50 min</option></select><button class="primary" id="quizStart">Start</button><span class="badge ok" id="quizTimer">--:--</span></div>
+      <div id="quizBox" class="grid"></div>
+      <div class="row"><button class="primary" id="quizSubmit">Grade</button><button class="danger" id="srsBtn">Due for review (<span id="dueN">0</span>)</button></div>
+      <div id="quizResult"></div>
+    </div>
+  </section>
+
+  <!-- Screen D: University Atlas + Guidelines -->
+  <section id="screen-atlas" hidden>
+    <div class="card"><h2>🎓 University Atlas & Guidelines</h2>
+      <p class="muted small">Sana'a / Aden / Taiz / Thamar / UST year maps + WHO/Yemen NTP updates.</p>
+      <div class="row"><select id="uniSel" aria-label="University"><option>Sanaa</option><option>Aden</option><option>UST</option><option>Taiz</option><option>Thamar</option></select><button class="primary" id="uniBtn">Load</button></div>
+      <div id="uniBox"></div><h3>Guidelines</h3><div id="guideBox" class="grid cols2"></div>
+    </div>
+  </section>
+
+  <div class="card small muted">DB: <span class="kbd">data/medical_app.db</span> • SQLite local-first • FK ON • <span id="auditLine">…</span> • <span id="apiStatus">API: checking…</span></div>
 </main>
 <footer>AI Tour Medical • Sana'a / Aden / Taiz / Thamar / UST • Gray's • Guyton • Harrison • Davidson • Nelson • MedMCQA/MedQA-compatible</footer>
 <script src="app.js"></script>
+<script src="pro.js"></script>
 </body>
 </html>

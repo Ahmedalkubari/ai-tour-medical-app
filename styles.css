@@ -32,6 +32,8 @@ a{color:var(--emerald)}
 .msg.me{align-self:flex-end;border-color:var(--emerald)} .msg.ai{align-self:flex-start}
 .row{display:flex;gap:8px} input,textarea,select{flex:1;background:#0f172a;color:var(--text);border:1px solid var(--border);border-radius:10px;padding:10px}
 button.primary{background:var(--emerald);border:0;color:#04120c;font-weight:700;padding:10px 16px;border-radius:10px;cursor:pointer}
+:focus-visible{outline:3px solid var(--emerald);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 button.danger{background:transparent;border:1px solid var(--crimson);color:var(--crimson);padding:8px 12px;border-radius:10px;cursor:pointer}
 .tree ul{list-style:none;margin:6px 0;padding-inline-start:18px;border-inline-start:1px solid var(--border)}
 .tree li{margin:6px 0} .tree summary{cursor:pointer} details{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:8px 10px;margin:6px 0}

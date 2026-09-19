@@ -7,6 +7,8 @@
     "build:db": "node scripts/build-db.mjs",
     "validate": "node pipeline/validate.mjs",
     "pipeline": "node pipeline/run-all.mjs",
+    "expand": "node scripts/expand-max.mjs",
+    "test": "node --test tests/pro.test.mjs",
     "serve": "node scripts/serve.mjs"
   }
 }

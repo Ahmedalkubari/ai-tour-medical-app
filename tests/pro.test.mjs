@@ -68,6 +68,22 @@ describe('v5 embeddings + FSRS', () => {
     assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name='Exam_Imports'").get());
   });
 });
+describe('v6 arabic + faculty', () => {
+  it('specialty packs present (derm/radio/ophtho)', () => {
+    const d = db.prepare(`SELECT COUNT(*) c FROM Question_Bank WHERE exam_source LIKE '%Derm%'`).get().c;
+    const r = db.prepare(`SELECT COUNT(*) c FROM Question_Bank WHERE exam_source LIKE '%Radio%'`).get().c;
+    const o = db.prepare(`SELECT COUNT(*) c FROM Question_Bank WHERE exam_source LIKE '%Ophth%' OR exam_source LIKE '%Ophtho%'`).get().c;
+    assert.ok(d >= 12 && r >= 12 && o >= 12);
+  });
+  it('arabic explanations backfilled', () => {
+    const c = db.prepare(`SELECT COUNT(*) c FROM Question_Bank WHERE explanation_ar IS NULL OR explanation_ar=''`).get().c;
+    assert.equal(c, 0);
+  });
+  it('faculty users table + admin seeded', () => {
+    assert.ok(db.prepare("SELECT name FROM sqlite_master WHERE name='Faculty_Users'").get());
+    assert.ok(db.prepare("SELECT username FROM Faculty_Users WHERE role='admin'").get());
+  });
+});
 describe('RAG guardrails', () => {
   it('emergency keywords flagged', () => {
     const EM = ['chest pain', 'suicide', 'انتحار'];

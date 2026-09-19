@@ -21,9 +21,10 @@ async function loadQueue() {
   j.rows.forEach(r => {
     const d = document.createElement('div'); d.className = 'card';
     d.innerHTML = `<b>#${r.id}</b> <span class="muted">[${r.src}]</span><p>${r.text.slice(0, 160)}…</p><div class="row"><button class="primary">Approve</button><button class="danger">Needs fix</button></div>`;
+    const H = () => { const t = localStorage.getItem('fac_token'); return t ? { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + t } : { 'Content-Type': 'application/json' }; };
     const [ok, fix] = d.querySelectorAll('button');
-    ok.onclick = async () => { await fetch('/api/review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'question', id: r.id, status: 'approved' }) }); d.remove(); loadCoverage(); };
-    fix.onclick = async () => { const n = prompt('Note / ملاحظة:') || ''; await fetch('/api/review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'question', id: r.id, status: 'needs_fix', note: n }) }); d.remove(); };
+    ok.onclick = async () => { const res = await fetch('/api/review', { method: 'POST', headers: H(), body: JSON.stringify({ kind: 'question', id: r.id, status: 'approved' }) }); if (res.status === 403) return alert('Faculty login required (reviewer+)'); d.remove(); loadCoverage(); };
+    fix.onclick = async () => { const n = prompt('Note / ملاحظة:') || ''; const res = await fetch('/api/review', { method: 'POST', headers: H(), body: JSON.stringify({ kind: 'question', id: r.id, status: 'needs_fix', note: n }) }); if (res.status === 403) return alert('Faculty login required (reviewer+)'); d.remove(); };
     $2('queueBox').appendChild(d);
   });
 }

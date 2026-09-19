@@ -2,6 +2,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
 const ROOT = process.cwd();
@@ -161,6 +162,16 @@ async function ragSmart(query, lang = 'ar') {
     answer: `${base.answer}\n${lang === 'ar' ? 'أدلة BM25 (عربي/إنجليزي + مرادفات):' : 'BM25 evidence (AR/EN + synonyms):'}\n${extra}${llm ? `\n🤖 Ollama draft:\n${llm}` : `\n(Ollama معطّل — عزز في data/llm.json. الوضع الحالي: استخلاصي محلي.)`}` };
 }
 const qImages = (qid) => db.prepare('SELECT m.image_id, m.title, m.svg_path, m.caption FROM Question_Images qi JOIN Medical_Images m ON m.image_id=qi.image_id WHERE qi.question_id=?').all(qid);
+// --- Faculty auth: scrypt passwords + HMAC tokens (roles: admin/reviewer/viewer) ---
+const SECRET = process.env.AITOUR_SECRET || 'dev-secret-change-me';
+const sign = (u, r) => crypto.createHmac('sha256', SECRET).update(u + ':' + r).digest('hex');
+function authed(req, roles = ['reviewer', 'admin']) {
+  const h = req.headers.authorization || '';
+  const [u, r, s] = h.replace('Bearer ', '').split(':');
+  if (!u || !s || !roles.includes(r)) return null;
+  if (crypto.timingSafeEqual(Buffer.from(s), Buffer.from(sign(u, r)))) return { username: u, role: r };
+  return null;
+}
 
 // --- FSRS-4.5-lite: stability/difficulty scheduler (SM-2 columns kept for compat) ---
 function fsrsNext(prev, grade) {
@@ -240,7 +251,7 @@ const server = http.createServer((req, res) => {
           const { answers = {}, user_id = 'demo_student' } = JSON.parse(body || '{}');
           const ids = Object.keys(answers).map(Number).filter(Boolean);
           let correct = 0; const detail = [];
-          const g = db.prepare('SELECT question_id, correct_answer, explanation, exam_source, topic_id FROM Question_Bank WHERE question_id=?');
+          const g = db.prepare('SELECT question_id, correct_answer, explanation, explanation_ar, exam_source, topic_id FROM Question_Bank WHERE question_id=?');
           const up = db.prepare(`INSERT INTO SRS_Schedule (user_id, question_id, ease, interval_d, reps, due_at, last_grade) VALUES (?,?,?,?,?,datetime('now', '+' || ? || ' days'),?)
             ON CONFLICT(user_id, question_id) DO UPDATE SET ease=excluded.ease, interval_d=excluded.interval_d, reps=excluded.reps, due_at=excluded.due_at, last_grade=excluded.last_grade`);
           for (const id of ids) {
@@ -254,7 +265,7 @@ const server = http.createServer((req, res) => {
             db.prepare('UPDATE SRS_Schedule SET stability=?, diff_fsrs=?, state=? WHERE user_id=? AND question_id=?').run(f.stability, f.diff_fsrs, f.state, user_id, id);
             db.prepare(`INSERT INTO Question_Stats (question_id, attempts, correct, difficulty, updated_at) VALUES (?,?,?,datetime('now'))
               ON CONFLICT(question_id) DO UPDATE SET attempts=attempts+1, correct=correct+?, difficulty=1.0* (correct+?)*1.0/(attempts+1), updated_at=datetime('now')`).run(id, 1, ok ? 1 : 0, ok ? 1 : 0, ok ? 1 : 0);
-            detail.push({ qid: id, ok, correct_answer: row.correct_answer, explanation: row.explanation, source: row.exam_source, topic_id: row.topic_id, images: qImages(id) });
+            detail.push({ qid: id, ok, correct_answer: row.correct_answer, explanation: row.explanation, explanation_ar: row.explanation_ar, source: row.exam_source, topic_id: row.topic_id, images: qImages(id) });
           }
           // weak areas
           const weak = db.prepare(`SELECT t.topic_title, COUNT(*) n FROM SRS_Schedule s JOIN Question_Bank qb ON qb.question_id=s.question_id JOIN Modules_Topics t ON t.topic_id=qb.topic_id WHERE s.user_id=? AND s.last_grade<3 GROUP BY t.topic_id ORDER BY n DESC LIMIT 5`).all(user_id);
@@ -310,6 +321,7 @@ const server = http.createServer((req, res) => {
         return send(res, 200, { users, attempts, avg_ease: +(avgEase || 0).toFixed(2), weak_topics: weak, hardest: hard, review_pct: +(100 * cov / Math.max(1, total)).toFixed(1) });
       }
       if (parts[1] === 'import-exam' && req.method === 'POST') {
+        if (!authed(req)) return send(res, 403, { error: 'reviewer login required' });
         let body = ''; req.on('data', c => body += c); return req.on('end', () => {
           // accepts {filename, source, raw_text} in parser.mjs Q:/A)/Answer:/Explain:/Source: format; PDFs must be converted to text first (see docs/exam-import.md)
           const { filename = 'upload.txt', source = 'Manual-Upload', raw_text = '' } = JSON.parse(body || '{}');
@@ -335,11 +347,29 @@ const server = http.createServer((req, res) => {
       if (parts[1] === 'imports') {
         return send(res, 200, { rows: db.prepare('SELECT * FROM Exam_Imports ORDER BY import_id DESC LIMIT 20').all() });
       }
+      if (parts[1] === 'faculty-login' && req.method === 'POST') {
+        let body = ''; req.on('data', c => body += c); return req.on('end', () => {
+          const { username = '', password = '' } = JSON.parse(body || '{}');
+          const u = db.prepare('SELECT * FROM Faculty_Users WHERE username=?').get(username);
+          if (!u) return send(res, 401, { error: 'bad credentials' });
+          const h = crypto.scryptSync(password, u.salt, 64).toString('hex');
+          if (!crypto.timingSafeEqual(Buffer.from(h), Buffer.from(u.pass_hash))) return send(res, 401, { error: 'bad credentials' });
+          send(res, 200, { token: `${u.username}:${u.role}:${sign(u.username, u.role)}`, role: u.role });
+        });
+      }
+      if (parts[1] === 'backup' && req.method === 'POST') {
+        if (!authed(req, ['admin'])) return send(res, 403, { error: 'admin only' });
+        const dir = path.join(ROOT, 'data', 'backups'); fs.mkdirSync(dir, { recursive: true });
+        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        for (const f of ['medical_app.db', 'audit.json']) { const s = path.join(ROOT, 'data', f); if (fs.existsSync(s)) fs.copyFileSync(s, path.join(dir, `${f.replace('.', `-${ts}.`)}`)); }
+        return send(res, 200, { ok: true, ts });
+      }
       if (parts[1] === 'review-queue') {
         const rows = db.prepare(`SELECT q.question_id id, q.question_text text, q.exam_source src, 'question' kind FROM Question_Bank q LEFT JOIN Review_Flags f ON f.target_kind='question' AND f.target_id=q.question_id AND f.status='approved' WHERE f.flag_id IS NULL ORDER BY q.question_id LIMIT ?`).all(Math.min(50, +q.n || 20));
         return send(res, 200, { rows });
       }
       if (parts[1] === 'review' && req.method === 'POST') {
+        if (!authed(req)) return send(res, 403, { error: 'reviewer login required' });
         let body = ''; req.on('data', c => body += c); return req.on('end', () => {
           const { kind = 'question', id, reviewer = 'editorial-board', status = 'approved', note = '' } = JSON.parse(body || '{}');
           db.prepare(`INSERT INTO Review_Flags (target_kind, target_id, reviewer, status, note) VALUES (?,?,?,?,?)`).run(kind, id, reviewer, status, note.slice(0, 500));

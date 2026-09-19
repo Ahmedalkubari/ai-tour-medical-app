@@ -3,3 +3,6 @@ node_modules/
 data/medical_app.db-shm
 data/medical_app.db-wal
 data/client-errors.log
+data/backups/
+data/medical_app.db-shm
+data/medical_app.db-wal

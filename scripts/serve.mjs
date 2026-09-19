@@ -9,6 +9,13 @@ const DB_PATH = path.join(ROOT, 'data', 'medical_app.db');
 const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA foreign_keys=ON');
 try { db.exec(fs.readFileSync(path.join(ROOT, 'db', 'migration_v3.sql'), 'utf8')); } catch {}
+try { db.exec(fs.readFileSync(path.join(ROOT, 'db', 'migration_v4.sql'), 'utf8')); } catch {}
+// auto-link: each question -> one diagram sharing its topic (deterministic)
+try {
+  db.exec(`INSERT OR IGNORE INTO Question_Images (question_id, image_id)
+    SELECT q.question_id, (SELECT image_id FROM Medical_Images m WHERE m.topic_id=q.topic_id ORDER BY image_id LIMIT 1)
+    FROM Question_Bank q WHERE (SELECT image_id FROM Medical_Images m WHERE m.topic_id=q.topic_id ORDER BY image_id LIMIT 1) IS NOT NULL`);
+} catch {}
 
 function rebuildFTS() {
   db.exec('DELETE FROM FTS_Questions; DELETE FROM FTS_Topics; DELETE FROM FTS_Cases;');
@@ -53,6 +60,44 @@ function rag(query, lang = 'ar') {
   const answer = `${warn}\n${lang === 'ar' ? 'خلاصة مبنية على بنك الأسئلة المحلي مع الاستشهاد:' : 'Local-bank grounded summary with citations:'}\n${body}\n${lang === 'ar' ? `حالات مرتبطة: ${cases.map(c => `#${c.case_id} ${c.chief_complaint}`).join('؛ ')}` : `Linked cases: ${cases.map(c => `#${c.case_id} ${c.chief_complaint}`).join('; ')}`}\n— ${lang === 'ar' ? 'تعليمي فقط، ليس استشارة طبية. تحقق من المرجع الأصلي.' : 'Educational only, not medical advice. Verify against primary reference.'}`;
   return { answer, citations: hits.map(h => ({ qid: h.question_id, source: h.exam_source })), emergency: flags };
 }
+
+// --- Semantic-lite retrieval: TF-IDF cosine over question corpus (no deps, offline) ---
+const tok = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9\u0600-\u06ff\s]/g, ' ').split(/\s+/).filter(w => w.length > 2);
+let TF = null;
+function buildTF() {
+  const docs = db.prepare('SELECT question_id, question_text, explanation FROM Question_Bank').all();
+  const df = {}, vecs = [];
+  for (const d of docs) {
+    const tf = {};
+    for (const w of tok(d.question_text + ' ' + d.explanation)) tf[w] = (tf[w] || 0) + 1;
+    for (const w of Object.keys(tf)) df[w] = (df[w] || 0) + 1;
+    vecs.push({ id: d.question_id, tf });
+  }
+  TF = { vecs, df, N: docs.length };
+}
+function cosSim(qvec, dvec, df, N) {
+  let dot = 0, qn = 0, dn = 0;
+  for (const [w, qtf] of Object.entries(qvec)) {
+    const idf = Math.log(1 + N / ((df[w] || 0) + 1));
+    const qw = qtf * idf; qn += qw * qw;
+    const dw = (dvec[w] || 0) * idf; dn += dw * dw; dot += qw * dw;
+  }
+  return qn && dn ? dot / (Math.sqrt(qn) * Math.sqrt(dn)) : 0;
+}
+function semSearch(query, k = 5) {
+  if (!TF) buildTF();
+  const qtf = {}; for (const w of tok(query)) qtf[w] = (qtf[w] || 0) + 1;
+  const scored = TF.vecs.map(v => ({ id: v.id, s: cosSim(qtf, v.tf, TF.df, TF.N) })).filter(x => x.s > 0).sort((a, b) => b.s - a.s).slice(0, k);
+  const g = db.prepare('SELECT question_id, question_text, explanation, exam_source FROM Question_Bank WHERE question_id=?');
+  return scored.map(x => ({ ...g.get(x.id), score: +x.s.toFixed(3) }));
+}
+function ragSem(query, lang = 'ar') {
+  const base = rag(query, lang);
+  const sem = semSearch(query, 5);
+  const extra = sem.map((h, i) => `[S${i + 1}|cos=${h.score}] Q#${h.question_id}: ${h.question_text}\n    → ${h.explanation} (${h.exam_source})`).join('\n');
+  return { ...base, semantic: sem.map(h => ({ qid: h.question_id, source: h.exam_source, score: h.score })), answer: `${base.answer}\n${lang === 'ar' ? 'أدلة دلالية (TF-IDF cosine):' : 'Semantic evidence (TF-IDF cosine:'}\n${extra}\n— ${lang === 'ar' ? 'وضع LLM الخارجي: ' + (JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'llm.json'), 'utf8')).provider) + ' (استخلاصي محلي افتراضياً؛ فعّل Ollama/WebLLM اختيارياً).' : 'External LLM mode: extractive-local by default; enable Ollama/WebLLM optionally.'}` };
+}
+const qImages = (qid) => db.prepare('SELECT m.image_id, m.title, m.svg_path, m.caption FROM Question_Images qi JOIN Medical_Images m ON m.image_id=qi.image_id WHERE qi.question_id=?').all(qid);
 
 const server = http.createServer((req, res) => {
   const [_, ...parts] = req.url.split('?')[0].split('/');
@@ -102,7 +147,9 @@ const server = http.createServer((req, res) => {
             const prev = db.prepare('SELECT ease, interval_d, reps FROM SRS_Schedule WHERE user_id=? AND question_id=?').get(user_id, id);
             const s = sm2(prev || {}, ok ? 4 : 1);
             up.run(user_id, id, s.ease, s.interval_d, s.reps, s.interval_d, ok ? 4 : 1);
-            detail.push({ qid: id, ok, correct_answer: row.correct_answer, explanation: row.explanation, source: row.exam_source, topic_id: row.topic_id });
+            db.prepare(`INSERT INTO Question_Stats (question_id, attempts, correct, difficulty, updated_at) VALUES (?,?,?,datetime('now'))
+              ON CONFLICT(question_id) DO UPDATE SET attempts=attempts+1, correct=correct+?, difficulty=1.0* (correct+?)*1.0/(attempts+1), updated_at=datetime('now')`).run(id, 1, ok ? 1 : 0, ok ? 1 : 0, ok ? 1 : 0);
+            detail.push({ qid: id, ok, correct_answer: row.correct_answer, explanation: row.explanation, source: row.exam_source, topic_id: row.topic_id, images: qImages(id) });
           }
           // weak areas
           const weak = db.prepare(`SELECT t.topic_title, COUNT(*) n FROM SRS_Schedule s JOIN Question_Bank qb ON qb.question_id=s.question_id JOIN Modules_Topics t ON t.topic_id=qb.topic_id WHERE s.user_id=? AND s.last_grade<3 GROUP BY t.topic_id ORDER BY n DESC LIMIT 5`).all(user_id);
@@ -120,6 +167,46 @@ const server = http.createServer((req, res) => {
           if (!query.trim()) return send(res, 400, { error: 'empty query' });
           send(res, 200, rag(query.slice(0, 500), lang));
         });
+      }
+      if (parts[1] === 'rag-sem' && req.method === 'POST') {
+        let body = ''; req.on('data', c => body += c); return req.on('end', () => {
+          const { query = '', lang = 'ar' } = JSON.parse(body || '{}');
+          if (!query.trim()) return send(res, 400, { error: 'empty query' });
+          send(res, 200, ragSem(query.slice(0, 500), lang));
+        });
+      }
+      if (parts[1] === 'review-queue') {
+        const rows = db.prepare(`SELECT q.question_id id, q.question_text text, q.exam_source src, 'question' kind FROM Question_Bank q LEFT JOIN Review_Flags f ON f.target_kind='question' AND f.target_id=q.question_id AND f.status='approved' WHERE f.flag_id IS NULL ORDER BY q.question_id LIMIT ?`).all(Math.min(50, +q.n || 20));
+        return send(res, 200, { rows });
+      }
+      if (parts[1] === 'review' && req.method === 'POST') {
+        let body = ''; req.on('data', c => body += c); return req.on('end', () => {
+          const { kind = 'question', id, reviewer = 'editorial-board', status = 'approved', note = '' } = JSON.parse(body || '{}');
+          db.prepare(`INSERT INTO Review_Flags (target_kind, target_id, reviewer, status, note) VALUES (?,?,?,?,?)`).run(kind, id, reviewer, status, note.slice(0, 500));
+          send(res, 200, { ok: true });
+        });
+      }
+      if (parts[1] === 'review-coverage') {
+        const total = db.prepare('SELECT COUNT(*) c FROM Question_Bank').get().c;
+        const appr = db.prepare("SELECT COUNT(DISTINCT target_id) c FROM Review_Flags WHERE target_kind='question' AND status='approved'").get().c;
+        const byDept = db.prepare(`SELECT c.department, COUNT(DISTINCT f.target_id) appr FROM Courses c JOIN Modules_Topics t ON t.course_id=c.course_id JOIN Question_Bank qb ON qb.topic_id=t.topic_id LEFT JOIN Review_Flags f ON f.target_kind='question' AND f.target_id=qb.question_id AND f.status='approved' GROUP BY c.department`).all();
+        return send(res, 200, { total, approved: appr, pct: +(100 * appr / Math.max(1, total)).toFixed(1), byDept });
+      }
+      if (parts[1] === 'quiz-adaptive') {
+        const n = Math.min(50, +q.n || 10); const uid = q.user_id || 'demo_student';
+        const rows = db.prepare(`SELECT qb.question_id, qb.question_text, qb.options_json, COALESCE(st.difficulty, 0.5) d,
+          CASE WHEN s.last_grade<3 THEN 0 ELSE 1 END weak
+          FROM Question_Bank qb LEFT JOIN Question_Stats st ON st.question_id=qb.question_id
+          LEFT JOIN SRS_Schedule s ON s.question_id=qb.question_id AND s.user_id=?
+          ORDER BY weak ASC, ABS(COALESCE(st.difficulty,0.5)-0.5) ASC, RANDOM() LIMIT ?`).all(uid, n);
+        return send(res, 200, { rows, time_sec: n * 60, mode: 'adaptive' });
+      }
+      if (parts[1] === 'plan') {
+        const uid = q.user_id || 'demo_student';
+        const weak = db.prepare(`SELECT t.topic_title, COUNT(*) n FROM SRS_Schedule s JOIN Question_Bank qb ON qb.question_id=s.question_id JOIN Modules_Topics t ON t.topic_id=qb.topic_id WHERE s.user_id=? AND s.last_grade<3 GROUP BY t.topic_id ORDER BY n DESC LIMIT 6`).all(uid);
+        const due = db.prepare(`SELECT COUNT(*) c FROM SRS_Schedule WHERE user_id=? AND due_at<=datetime('now')`).get(uid).c;
+        const weeks = weak.length ? weak.map((w, i) => ({ week: i % 4 + 1, focus: w.topic_title, tasks: [`20 adaptive Qs on ${w.topic_title}`, 'Review due SRS cards', 'Read linked chapter map + 1 OSCE station'] })) : [{ week: 1, focus: 'High-yield mixed review', tasks: ['20 adaptive Qs', 'Anatomy + Physiology core', '1 OSCE station'] }];
+        return send(res, 200, { due_now: due, weeks });
       }
       if (parts[1] === 'error' && req.method === 'POST') {
         let body = ''; req.on('data', c => body += c); return req.on('end', () => {

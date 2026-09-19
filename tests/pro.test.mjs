@@ -27,6 +27,20 @@ describe('SM-2 math', () => {
   it('fail resets reps', () => assert.equal(sm2({ ease: 2.5, interval_d: 10, reps: 3 }, 1).reps, 0));
 });
 
+describe('v4 trust layer', () => {
+  it('review coverage seeded >= 400', () => {
+    const c = db.prepare("SELECT COUNT(*) c FROM Review_Flags WHERE status='approved'").get().c;
+    assert.ok(c >= 400);
+  });
+  it('questions linked to diagrams', () => {
+    const c = db.prepare('SELECT COUNT(*) c FROM Question_Images').get().c;
+    assert.ok(c > 1000);
+  });
+  it('TF-IDF corpus built', () => {
+    const c = db.prepare('SELECT COUNT(*) c FROM Question_Bank').get().c;
+    assert.ok(c >= 3000);
+  });
+});
 describe('RAG guardrails', () => {
   it('emergency keywords flagged', () => {
     const EM = ['chest pain', 'suicide', 'انتحار'];

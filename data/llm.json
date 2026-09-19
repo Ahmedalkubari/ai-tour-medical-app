@@ -1,0 +1,1 @@
+{"provider":"extractive-local","ollama":{"url":"http://localhost:11434","model":"meditron:7b","enabled":false},"webllm":{"model":"Phi-3-mini","enabled":false},"note":"Default is offline extractive synthesis over local DB. Enable Ollama/WebLLM optionally; all answers keep citations + disclaimer."}
